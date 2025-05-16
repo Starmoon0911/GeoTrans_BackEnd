@@ -1,0 +1,10 @@
+{
+  "version": "0.0.1",
+  "changelog": [
+    {
+      "version": "0.0.1",
+      "date": "2025-05-16",
+      "description": "初始化版本，包含基本的功能和API接口"
+    }
+  ]
+}

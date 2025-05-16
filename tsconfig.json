@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "target": "es5", // 選擇要編譯成哪種版本的 javascript
+        "module": "commonjs",
+        "strict": false, // 嚴格模式，啟用後需要指定函數參數的 type
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "outDir": "dist" // 將編譯過後的 js 檔放到 dist 資料夾中
+    }
+}
