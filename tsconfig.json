@@ -6,6 +6,24 @@
         "esModuleInterop": true,
         "skipLibCheck": true,
         "forceConsistentCasingInFileNames": true,
-        "outDir": "dist" // 將編譯過後的 js 檔放到 dist 資料夾中
+        "outDir": "dist", // 將編譯過後的 js 檔放到 dist 資料夾中
+        "baseUrl": ".",
+        "paths": {
+            "@/*": [
+                "./*"
+            ],
+            "@lib/*": [
+                "src/lib/*"
+            ],
+            "@src/*": [
+                "src/*"
+            ],
+            "@database/*": [
+                "src/database/*"
+            ],
+            "@utils/*": [
+                "utils/*"
+            ]
+        },
     }
 }

@@ -9,6 +9,7 @@ import './src/cron/updateEYnews';
 app.use(cors())
 app.use(helmet());
 app.use(express.json());
+app.use(express.static('wav'))
 require('dotenv').config()
 const PORT = process.env.PORT || 9000;
 app.listen(PORT, () => {

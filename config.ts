@@ -1,16 +1,17 @@
 
   const RSS = {
     education: 'https://www.edu.tw/Rss_News.aspx?n=9E7AC85F1954DDA8',
-    executive: "https://www.ey.gov.tw/RSS_Content.aspx?ModuleType=3"
+    executive: "https://www.ey.gov.tw/RSS_Content.aspx?ModuleType=3",
+    nantou: "https://www.nantou.gov.tw/big5/newsrss.php",
   };
   
   const agent = {
     useModel: "gemini", 
     gemini: {
-      textModel: "gemini-1.5-flash",
-      visionModel: "gemini-1.5-flash",
+      textModel: "gemini-2.0-flash",
+      visionModel: "gemini-2.0-flash",
       embeddingModel: "text-embedding-004",
-      apikey: process.env.GEMINI_APIKEY || "",
+      apikey: process.env.gemini_apikey || "",
       base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
     },
     ollama: {

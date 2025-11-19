@@ -1,6 +1,11 @@
 {
-  "version": "0.0.1",
+  "version": "0.0.2",
   "changelog": [
+    {
+      "version": "0.0.2",
+      "date": "2025-05-17",
+      "description": "增加工廠模式Database管理"
+    },
     {
       "version": "0.0.1",
       "date": "2025-05-16",

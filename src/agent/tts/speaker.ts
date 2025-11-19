@@ -1,8 +1,8 @@
-// src/agent/tts/speaker.ts
 import axios from "axios";
 import fs from "fs";
 import path from "path";
 import ffmpeg from "fluent-ffmpeg";
+import safeProjectName from "@/utils/safeProjectName";
 
 const absoluteRefAudioPath = path.resolve(__dirname, "ref_audio.wav");
 if (!fs.existsSync(absoluteRefAudioPath)) {
@@ -16,30 +16,54 @@ export interface ChunkInfo {
   text: string;
 }
 
-export async function segmentText(text: string): Promise<string[]> {
-  return text
-    .replace(/([，。．！!？?])/g, "$1\n")   // 中標點
-    .replace(/(\.|\?|!)(?=\s|$)/g, "$1\n") // 英標點
-    .split("\n")
-    .map(s => s.trim())
-    .filter(s => s.length > 0);
+interface TextToken {
+  text: string;
+  tts: boolean;
 }
 
-// 修改：多傳一個 tempDir 參數
-export async function synthesizeChunk(
+function tokenizeByTTS(text: string): TextToken[] {
+  const tokens: TextToken[] = [];
+  const parts = text.split(/(<\/?NoTTSHere>)/g).filter(Boolean);
+
+  let isInsideNoTTS = false;
+  for (const part of parts) {
+    if (part === '<NoTTSHere>') {
+      isInsideNoTTS = true;
+      continue;
+    }
+    if (part === '</NoTTSHere>') {
+      isInsideNoTTS = false;
+      continue;
+    }
+    if (part.trim()) {
+        tokens.push({ text: part, tts: !isInsideNoTTS });
+    }
+  }
+  return tokens;
+}
+
+function segmentText(text: string): string[] {
+  return text
+    .replace(/([，。．！!？?])/g, "$1\n")
+    .replace(/(\.|\?|!)(?=\s|$)/g, "$1\n")
+    .split("\n")
+    .map(s => s.trim())
+    .filter(s => s.length > 0 && /[a-zA-Z\u4e00-\u9fff]/.test(s));
+}
+
+async function synthesizeChunk(
   text: string,
   index: number,
   tempDir: string
 ): Promise<string> {
   const res = await axios.post(
-    "http://127.0.0.1:9880/tts",
+    "https://geotransai.wei0911.dpdns.org/tts",
     {
       text,
       text_lang: "zh",
-      ref_audio_path: absoluteRefAudioPath,
+      ref_audio_path: "ref_audio.wav",
       prompt_lang: "zh",
-      prompt_text:
-        "隨著深度學習的發展，自然語言處理 (Natural Language Processing，NLP) 技術越趨成熟",
+      prompt_text: "隨著深度學習的發展，自然語言處理技術越趨成熟",
       text_split_method: "cut0",
       streaming_mode: false,
     },
@@ -51,62 +75,49 @@ export async function synthesizeChunk(
   return filePath;
 }
 
-// 同樣多傳 tempDir
-export async function assembleChunks(
-  chunkPaths: string[],
-  outputPath: string,
-  tempDir: string
-): Promise<{ start: number; end: number; index: number }[]> {
-  const listPath = path.join(tempDir, "tts_files.txt");
-  // 若不存在就創建一個空檔
-  if (!fs.existsSync(listPath)) {
-    fs.writeFileSync(listPath, "", "utf-8");
-  }
-
-  // 產生 concat list
-  const listContent = chunkPaths.map(p => `file '${p}'`).join("\n");
-  fs.writeFileSync(listPath, listContent, "utf-8");
-
-  // 計算時間戳
-  let total = 0;
-  const timestamps: { start: number; end: number; index: number }[] = [];
-  for (let i = 0; i < chunkPaths.length; i++) {
-    const p = chunkPaths[i];
-    if (!fs.existsSync(p)) {
-      throw new Error(`找不到音訊檔 ${p}`);
-    }
-    const dur = await getAudioDuration(p);
-    timestamps.push({ start: total, end: total + dur, index: i });
-    total += dur;
-  }
-
-  // ffmpeg concat
-  await new Promise<void>((resolve, reject) => {
-    ffmpeg()
-      .input(listPath)
-      .inputOptions("-f", "concat", "-safe", "0")
-      .outputOptions("-c", "copy")
-      .save(outputPath)
-      .on("end", () => resolve())
-      .on("error", err => reject(err));
-  });
-
-  return timestamps;
-}
-
 function getAudioDuration(file: string): Promise<number> {
   return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(file, (_err, data) => {
-      if (!data || !data.format) {
-        return reject(new Error(`ffprobe 無法取得檔案資訊: ${file}`));
+    ffmpeg.ffprobe(file, (err, data) => {
+      if (err || !data?.format?.duration) {
+        return reject(err || new Error(`無法獲取音訊時長: ${file}`));
       }
-      resolve(data.format.duration ?? 0);
+      resolve(data.format.duration);
     });
   });
 }
 
-export function writeIndexFile(chunks: ChunkInfo[], outputDir: string) {
-  const jsonPath = path.join(outputDir, "index.json");
+async function assembleChunks(
+  chunkPaths: string[],
+  outputPath: string,
+  tempDir: string
+): Promise<Pick<ChunkInfo, "start" | "end" | "index">[]> {
+  const listPath = path.join(tempDir, "tts_files.txt");
+  const listContent = chunkPaths.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join("\n");
+  fs.writeFileSync(listPath, listContent, "utf-8");
+
+  const stamps: { start: number; end: number; index: number }[] = [];
+  let totalDuration = 0;
+  for (let i = 0; i < chunkPaths.length; i++) {
+    const duration = await getAudioDuration(chunkPaths[i]);
+    stamps.push({ start: totalDuration, end: totalDuration + duration, index: i });
+    totalDuration += duration;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg()
+      .input(listPath)
+      .inputOptions(["-f", "concat", "-safe", "0"])
+      .outputOptions("-c", "copy")
+      .save(outputPath)
+      .on("end", resolve)
+      .on("error", reject);
+  });
+
+  return stamps;
+}
+
+function writeIndexFile(chunks: ChunkInfo[], outputDir: string) {
+  const jsonPath = path.join(outputDir, "index_chinese.json");
   fs.writeFileSync(jsonPath, JSON.stringify(chunks, null, 2), "utf-8");
 }
 
@@ -114,39 +125,72 @@ export async function processTTS(
   text: string,
   projectName: string
 ): Promise<{ audioPath: string; chunks: ChunkInfo[] }> {
-  // 1. 切句
-  const segments = await segmentText(text);
-
-  // 2. 建立專屬 temp 目錄
-  const tempDir = path.resolve("temp", `${projectName}_${Date.now()}`);
+  const _safeProjectName = safeProjectName(projectName);
+  const tokens = tokenizeByTTS(text);
+  
+  const tempDir = path.resolve("temp", `${_safeProjectName}_${Date.now()}_chinese`);
   fs.mkdirSync(tempDir, { recursive: true });
 
-  // 3. 逐句合成
-  const chunkPaths: string[] = [];
-  for (let i = 0; i < segments.length; i++) {
-    const p = await synthesizeChunk(segments[i], i, tempDir);
-    chunkPaths.push(p);
+  const audioChunkPaths: string[] = [];
+  const allChunksMeta: (Omit<ChunkInfo, 'start' | 'end'> & { wasSynthesized: boolean })[] = [];
+  let globalIndex = 0;
+  let audioFileIndex = 0;
+
+  for (const token of tokens) {
+    if (token.tts) {
+      const segments = segmentText(token.text);
+      for (const segment of segments) {
+        try {
+          const filePath = await synthesizeChunk(segment, audioFileIndex, tempDir);
+          audioChunkPaths.push(filePath);
+          allChunksMeta.push({ index: globalIndex, text: segment, wasSynthesized: true });
+          audioFileIndex++;
+        } catch (err) {
+          console.warn(`跳過TTS失敗的句子: "${segment}"`, Buffer.from(err.response.data).toString("utf8"));
+          allChunksMeta.push({ index: globalIndex, text: segment, wasSynthesized: false });
+        }
+        globalIndex++;
+      }
+    } else {
+      allChunksMeta.push({ index: globalIndex, text: token.text, wasSynthesized: false });
+      globalIndex++;
+    }
   }
 
-  // 4. 建立輸出目錄
-  const outputDir = path.resolve("wav", projectName);
+  if (audioChunkPaths.length === 0) {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    
+    const outputDir = path.join("wav", `${_safeProjectName}_chinese`);
+    fs.mkdirSync(outputDir, { recursive: true });
+    const textOnlyChunks = allChunksMeta.map(meta => ({ ...meta, start: 0, end: 0 }));
+    writeIndexFile(textOnlyChunks, outputDir);
+    return { audioPath: "", chunks: textOnlyChunks };
+  }
+
+  const outputDir = path.join("wav", _safeProjectName);
   fs.mkdirSync(outputDir, { recursive: true });
-  const finalAudio = path.join(outputDir, "audio.wav");
+  const finalAudioPath = path.join(outputDir, "audio_chinese.wav");
 
-  // 5. 拼接 & 取得時間戳
-  const raw = await assembleChunks(chunkPaths, finalAudio, tempDir);
+  const audioTimeStamps = await assembleChunks(audioChunkPaths, finalAudioPath, tempDir);
 
-  // 6. 帶文字的時間戳
-  const chunksInfo: ChunkInfo[] = raw.map(ts => ({
-    ...ts,
-    text: segments[ts.index],
-  }));
+  const finalChunks: ChunkInfo[] = [];
+  let audioStampIndex = 0;
+  for (const meta of allChunksMeta) {
+    if (meta.wasSynthesized) {
+      const stamp = audioTimeStamps[audioStampIndex];
+      if (stamp) {
+        finalChunks.push({ index: meta.index, text: meta.text, start: stamp.start, end: stamp.end });
+        audioStampIndex++;
+      } else {
+         finalChunks.push({ index: meta.index, text: meta.text, start: 0, end: 0 });
+      }
+    } else {
+      const prevEnd = finalChunks.length > 0 ? finalChunks[finalChunks.length - 1].end : 0;
+      finalChunks.push({ index: meta.index, text: meta.text, start: prevEnd, end: prevEnd });
+    }
+  }
 
-  // 7. 清理：刪除整個專屬 temp 目錄
   fs.rmSync(tempDir, { recursive: true, force: true });
-
-  // 8. 輸出 index.json
-  writeIndexFile(chunksInfo, outputDir);
-
-  return { audioPath: finalAudio, chunks: chunksInfo };
+  writeIndexFile(finalChunks, outputDir);
+  return { audioPath: _safeProjectName, chunks: finalChunks };
 }

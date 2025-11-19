@@ -1,7 +1,7 @@
 import { OpenAI } from 'openai';
 import config from '../../config';
 import urlToBase64 from '../lib/url2base64';
-
+import { zodResponseFormat } from 'openai/helpers/zod';
 interface Props {
     prompt?: string;
     _model?: string;
@@ -12,6 +12,7 @@ interface InvokeParams {
     systemPrompt: string;
     imgUrl?: string;
     maxTokens?: number | undefined; // 新增可選 maxTokens 參數
+    zod?: any;
 }
 
 function limitedLog(message, maxLength = 100) {
@@ -45,7 +46,7 @@ export class DefaultAgent {
         console.log(`LLM created for model: ${this.model}`);
     }
 
-    async invoke({ prompt, systemPrompt, imgUrl, maxTokens }: InvokeParams) {
+    async invoke({ prompt, systemPrompt, imgUrl, maxTokens, zod }: InvokeParams) {
         try {
             let imageBase64: string | undefined;
             let messages;
@@ -103,6 +104,7 @@ export class DefaultAgent {
 
             const response = await this.llm.chat.completions.create({
                 model: this.model,
+                response_format: zod ? zodResponseFormat(zod, "news_analysis") : undefined,
                 messages,
                 max_tokens: maxTokens, // 傳遞 maxTokens 至 API 請求
             });
